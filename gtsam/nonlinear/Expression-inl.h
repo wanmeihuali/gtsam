@@ -19,6 +19,13 @@
 
 #pragma once
 
+// The MSVC compiler workaround for the unsupported variable length array
+// utilizes the std::unique_ptr<> custom deleter.
+// See Expression<T>::valueAndJacobianMap() below.
+#ifdef _MSC_VER
+#include <memory>
+#endif
+
 #include <gtsam/nonlinear/internal/ExpressionNode.h>
 
 namespace gtsam {
@@ -136,9 +143,7 @@ T Expression<T>::value(const Values& values,
     std::vector<Matrix>* H) const {
   if (H) {
     // Call private version that returns derivatives in H
-    KeyVector keys;
-    FastVector<int> dims;
-    std::tie(keys, dims) = keysAndDims();
+    const auto [keys, dims] = keysAndDims();
     return valueAndDerivatives(values, keys, dims, *H);
   } else
     // no derivatives needed, just return value
@@ -202,7 +207,10 @@ T Expression<T>::valueAndJacobianMap(const Values& values,
   // allocated on Visual Studio. For more information see the issue below
   // https://bitbucket.org/gtborg/gtsam/issue/178/vlas-unsupported-in-visual-studio
 #ifdef _MSC_VER
-  auto traceStorage = static_cast<internal::ExecutionTraceStorage*>(_aligned_malloc(size, internal::TraceAlignment));
+  std::unique_ptr<void, void(*)(void*)> traceStorageDeleter(
+    _aligned_malloc(size, internal::TraceAlignment),
+    [](void *ptr){ _aligned_free(ptr); });
+  auto traceStorage = static_cast<internal::ExecutionTraceStorage*>(traceStorageDeleter.get());
 #else
   internal::ExecutionTraceStorage traceStorage[size];
 #endif
@@ -210,10 +218,6 @@ T Expression<T>::valueAndJacobianMap(const Values& values,
   internal::ExecutionTrace<T> trace;
   T value(this->traceExecution(values, trace, traceStorage));
   trace.startReverseAD1(jacobians);
-
-#ifdef _MSC_VER
-  _aligned_free(traceStorage);
-#endif
 
   return value;
 }
@@ -223,7 +227,7 @@ typename Expression<T>::KeysAndDims Expression<T>::keysAndDims() const {
   std::map<Key, int> map;
   dims(map);
   size_t n = map.size();
-  KeysAndDims pair = std::make_pair(KeyVector(n), FastVector<int>(n));
+  KeysAndDims pair = {KeyVector(n), FastVector<int>(n)};
   // Copy map into pair of vectors
   auto key_it = pair.first.begin();
   auto dim_it = pair.second.begin();

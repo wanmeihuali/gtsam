@@ -18,6 +18,7 @@
 #ifdef GTSAM_USE_TBB
 #include <mutex>
 #endif
+#include <queue>
 
 namespace gtsam {
 
@@ -97,6 +98,41 @@ void ClusterTree<GRAPH>::Cluster::mergeChildren(
 template <class GRAPH>
 void ClusterTree<GRAPH>::print(const std::string& s, const KeyFormatter& keyFormatter) const {
   treeTraversal::PrintForest(*this, s, keyFormatter);
+}
+
+/* ************************************************************************* */
+
+/* Destructor.
+ * Using default destructor causes stack overflow for large trees due to recursive destruction of nodes;
+ * so we manually decrease the reference count of each node in the tree through a BFS, and the nodes with
+ * reference count 0 will be deleted. Please see [PR-1441](https://github.com/borglab/gtsam/pull/1441) for more details.
+ */
+template <class GRAPH>
+ClusterTree<GRAPH>::~ClusterTree() {
+  // For each tree, we first move the root into a queue; then we do a BFS on the tree with the queue;
+  
+  for (auto&& root : roots_) {
+    std::queue<sharedNode> bfs_queue;
+    // first, move the root to the queue
+    bfs_queue.push(root);
+    root = nullptr; // now the root node is owned by the queue
+
+    // for each node iterated, if its reference count is 1, it will be deleted while its children are still in the queue.
+    // so that the recursive deletion will not happen.
+    while (!bfs_queue.empty()) {
+      // move the ownership of the front node from the queue to the current variable
+      auto node = bfs_queue.front();
+      bfs_queue.pop();
+
+      // add the children of the current node to the queue, so that the queue will also own the children nodes.
+      for (auto child : node->children) {
+        bfs_queue.push(child);
+      } // leaving the scope of current will decrease the reference count of the current node by 1, and if the reference count is 0,
+        // the node will be deleted. Because the children are in the queue, the deletion of the node will not trigger a recursive
+        // deletion of the children.
+    }
+  }
+
 }
 
 /* ************************************************************************* */
@@ -185,8 +221,8 @@ struct EliminationData {
       // Gather factors
       FactorGraphType gatheredFactors;
       gatheredFactors.reserve(node->factors.size() + node->nrChildren());
-      gatheredFactors += node->factors;
-      gatheredFactors += myData.childFactors;
+      gatheredFactors.push_back(node->factors);
+      gatheredFactors.push_back(myData.childFactors);
 
       // Check for Bayes tree orphan subtrees, and add them to our children
       // TODO(frank): should this really happen here?
@@ -209,9 +245,13 @@ struct EliminationData {
       // Fill nodes index - we do this here instead of calling insertRoot at the end to avoid
       // putting orphan subtrees in the index - they'll already be in the index of the ISAM2
       // object they're added to.
-      for (const Key& j: myData.bayesTreeNode->conditional()->frontals())
-        nodesIndex_.insert(std::make_pair(j, myData.bayesTreeNode));
-
+      for (const Key& j : myData.bayesTreeNode->conditional()->frontals()) {
+#ifdef GTSAM_USE_TBB
+        nodesIndex_.insert({j, myData.bayesTreeNode});
+#else
+        nodesIndex_.emplace(j, myData.bayesTreeNode);
+#endif
+      }
       // Store remaining factor in parent's gathered factors
       if (!eliminationResult.second->empty()) {
 #ifdef GTSAM_USE_TBB
@@ -273,7 +313,7 @@ EliminatableClusterTree<BAYESTREE, GRAPH>::eliminate(const Eliminate& function) 
   }
 
   // Return result
-  return std::make_pair(result, remaining);
+  return {result, remaining};
 }
 
 } // namespace gtsam

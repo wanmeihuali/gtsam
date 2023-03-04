@@ -18,6 +18,7 @@
 #pragma once
 
 #include <stack>
+#include <queue>
 
 #include <gtsam/base/timing.h>
 #include <gtsam/base/treeTraversal-inst.h>
@@ -181,6 +182,43 @@ namespace gtsam {
   }
 
   /* ************************************************************************* */
+  
+  /** Destructor
+   * Using default destructor causes stack overflow for large trees due to recursive destruction of nodes;
+   * so we manually decrease the reference count of each node in the tree through a BFS, and the nodes with
+   * reference count 0 will be deleted. Please see [PR-1441](https://github.com/borglab/gtsam/pull/1441) for more details.
+   */
+  template<class BAYESNET, class GRAPH>
+  EliminationTree<BAYESNET,GRAPH>::~EliminationTree()
+  {
+    // For each tree, we first move the root into a queue; then we do a BFS on the tree with the queue;
+
+    for (auto&& root : roots_) {
+      std::queue<sharedNode> bfs_queue;
+
+      // first, move the root to the queue
+      bfs_queue.push(root);
+      root = nullptr; // now the root node is owned by the queue
+
+      // for each node iterated, if its reference count is 1, it will be deleted while its children are still in the queue.
+      // so that the recursive deletion will not happen.
+      while (!bfs_queue.empty()) {
+        // move the ownership of the front node from the queue to the current variable
+        auto node = bfs_queue.front();
+        bfs_queue.pop();
+
+        // add the children of the current node to the queue, so that the queue will also own the children nodes.
+        for (auto&& child : node->children) {
+          bfs_queue.push(child);
+        } // leaving the scope of current will decrease the reference count of the current node by 1, and if the reference count is 0,
+          // the node will be deleted. Because the children are in the queue, the deletion of the node will not trigger a recursive
+          // deletion of the children.
+      }
+    }
+  }
+
+
+  /* ************************************************************************* */
   template<class BAYESNET, class GRAPH>
   std::pair<std::shared_ptr<BAYESNET>, std::shared_ptr<GRAPH> >
     EliminationTree<BAYESNET,GRAPH>::eliminate(Eliminate function) const
@@ -198,7 +236,7 @@ namespace gtsam {
     allRemainingFactors->push_back(remainingFactors.begin(), remainingFactors.end());
 
     // Return result
-    return std::make_pair(result, allRemainingFactors);
+    return {result, allRemainingFactors};
   }
 
   /* ************************************************************************* */
@@ -218,13 +256,13 @@ namespace gtsam {
     // Add roots in sorted order
     {
       FastMap<Key,sharedNode> keys;
-      for(const sharedNode& root: this->roots_) { keys.insert(std::make_pair(root->key, root)); }
+      for(const sharedNode& root: this->roots_) { keys.emplace(root->key, root); }
       typedef typename FastMap<Key,sharedNode>::value_type Key_Node;
       for(const Key_Node& key_node: keys) { stack1.push(key_node.second); }
     }
     {
       FastMap<Key,sharedNode> keys;
-      for(const sharedNode& root: expected.roots_) { keys.insert(std::make_pair(root->key, root)); }
+      for(const sharedNode& root: expected.roots_) { keys.emplace(root->key, root); }
       typedef typename FastMap<Key,sharedNode>::value_type Key_Node;
       for(const Key_Node& key_node: keys) { stack2.push(key_node.second); }
     }
@@ -258,13 +296,13 @@ namespace gtsam {
       // Add children in sorted order
       {
         FastMap<Key,sharedNode> keys;
-        for(const sharedNode& node: node1->children) { keys.insert(std::make_pair(node->key, node)); }
+        for(const sharedNode& node: node1->children) { keys.emplace(node->key, node); }
         typedef typename FastMap<Key,sharedNode>::value_type Key_Node;
         for(const Key_Node& key_node: keys) { stack1.push(key_node.second); }
       }
       {
         FastMap<Key,sharedNode> keys;
-        for(const sharedNode& node: node2->children) { keys.insert(std::make_pair(node->key, node)); }
+        for(const sharedNode& node: node2->children) { keys.emplace(node->key, node); }
         typedef typename FastMap<Key,sharedNode>::value_type Key_Node;
         for(const Key_Node& key_node: keys) { stack2.push(key_node.second); }
       }

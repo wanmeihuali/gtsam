@@ -31,8 +31,6 @@
 #include <gtsam/base/FastMap.h>
 #include <gtsam/base/cholesky.h>
 
-#include <boost/format.hpp>
-
 #include <cmath>
 #include <sstream>
 #include <stdexcept>
@@ -96,9 +94,7 @@ JacobianFactor::JacobianFactor(const HessianFactor& factor)
   Ab_.full() = factor.info().selfadjointView();
 
   // Do Cholesky to get a Jacobian
-  size_t maxrank;
-  bool success;
-  std::tie(maxrank, success) = choleskyCareful(Ab_.matrix());
+  const auto [maxrank, success] = choleskyCareful(Ab_.matrix());
 
   // Check that Cholesky succeeded OR it managed to factor the full Hessian.
   // THe latter case occurs with non-positive definite matrices arising from QP.
@@ -215,9 +211,7 @@ void JacobianFactor::JacobianFactorHelper(const GaussianFactorGraph& graph,
       graph);
 
   // Count dimensions
-  FastVector<DenseIndex> varDims;
-  DenseIndex m, n;
-  std::tie(varDims, m, n) = _countDims(jacobians, orderedSlots);
+  const auto [varDims, m, n] = _countDims(jacobians, orderedSlots);
 
   // Allocate matrix and copy keys in order
   gttic(allocate);
@@ -411,7 +405,7 @@ void JacobianFactor::print(const string& s,
   if (!s.empty())
     cout << s << "\n";
   for (const_iterator key = begin(); key != end(); ++key) {
-    cout << boost::format("  A[%1%] = ") % formatter(*key);
+    cout << "  A[" << formatter(*key) << "] = ";
     cout << getA(key).format(matlabFormat()) << endl;
   }
   cout << formatMatrixIndented("  b = ", getb(), true) << "\n";

@@ -39,15 +39,15 @@ std::tuple<NonlinearFactorGraph, Values> generateProblem() {
   // 2b. Add odometry factors
   SharedDiagonal odometryNoise = noiseModel::Diagonal::Sigmas(
       Vector3(0.2, 0.2, 0.1));
-  graph += BetweenFactor<Pose2>(1, 2, Pose2(2.0, 0.0, 0.0), odometryNoise);
-  graph += BetweenFactor<Pose2>(2, 3, Pose2(2.0, 0.0, M_PI_2), odometryNoise);
-  graph += BetweenFactor<Pose2>(3, 4, Pose2(2.0, 0.0, M_PI_2), odometryNoise);
-  graph += BetweenFactor<Pose2>(4, 5, Pose2(2.0, 0.0, M_PI_2), odometryNoise);
+  graph.emplace_shared<BetweenFactor<Pose2>>(1, 2, Pose2(2.0, 0.0, 0.0), odometryNoise);
+  graph.emplace_shared<BetweenFactor<Pose2>>(2, 3, Pose2(2.0, 0.0, M_PI_2), odometryNoise);
+  graph.emplace_shared<BetweenFactor<Pose2>>(3, 4, Pose2(2.0, 0.0, M_PI_2), odometryNoise);
+  graph.emplace_shared<BetweenFactor<Pose2>>(4, 5, Pose2(2.0, 0.0, M_PI_2), odometryNoise);
 
   // 2c. Add pose constraint
   SharedDiagonal constraintUncertainty = noiseModel::Diagonal::Sigmas(
       Vector3(0.2, 0.2, 0.1));
-  graph += BetweenFactor<Pose2>(5, 2, Pose2(2.0, 0.0, M_PI_2),
+  graph.emplace_shared<BetweenFactor<Pose2>>(5, 2, Pose2(2.0, 0.0, M_PI_2),
       constraintUncertainty);
 
   // 3. Create the data structure to hold the initialEstimate estimate to the solution
@@ -63,16 +63,12 @@ std::tuple<NonlinearFactorGraph, Values> generateProblem() {
   Pose2 x5(2.1, 2.1, -M_PI_2);
   initialEstimate.insert(5, x5);
 
-  return std::tie(graph, initialEstimate);
+  return {graph, initialEstimate};
 }
 
 /* ************************************************************************* */
 TEST(NonlinearConjugateGradientOptimizer, Optimize) {
-
-  NonlinearFactorGraph graph;
-  Values initialEstimate;
-
-  std::tie(graph, initialEstimate) = generateProblem();
+const auto [graph, initialEstimate] = generateProblem();
 //  cout << "initial error = " << graph.error(initialEstimate) << endl;
 
   NonlinearOptimizerParams param;
